@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://ampmie-wrk.github.io/pub-retirement",
+  "homepage": "https://ampmie-wrk.github.io/pub-retirement/",
   "scripts": {
     "dev": "vite",
     "lint": "eslint .",
