@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [
     react({
-      base: "/pub-retirement/",
+      base: "./",
       babel: {
         plugins: [['babel-plugin-react-compiler']],
       },
