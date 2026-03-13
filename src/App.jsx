@@ -366,7 +366,7 @@ const RetirementPlanner = () => {
         {/* Header */}
         <div className="bg-slate-900 text-white p-6 md:p-8 flex items-center justify-between print:bg-slate-900 print:text-white">
           <div>
-            <a href='https://www.facebook.com/budgetbrews' target='_blank'><img src="src/assets/bb-logo.jpg" alt="BudgetBrews Logo" class="w-24 h-24 rounded-full shadow-sm"></img></a>
+            <a href='https://www.facebook.com/budgetbrews' target='_blank'><img src="/images/bb-logo.jpg" alt="BudgetBrews Logo" class="w-24 h-24 rounded-full shadow-sm"></img></a>
             <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
               <Calculator className="w-8 h-8 text-emerald-400" />
               จำลองแผนเกษียณอายุ / Retirement Planning Simulator by BudgetBrews
