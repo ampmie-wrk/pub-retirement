@@ -9,19 +9,21 @@ import {
 } from 'lucide-react';
 
 // --- Helper Component: Number Input with Comma ---
-// แสดงเลขมี comma ตอนไม่ได้ focus, แสดงเลขดิบตอนแก้ไข เพื่อกัน Cursor กระโดด
 const NumberInput = ({ value, onChange, className, ...props }) => {
   const [isFocused, setIsFocused] = useState(false);
 
   const formatDisplay = (val) => {
-    if (val === '' || val === null || val === undefined) return '';
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(val);
+    if (val === '' || val === null || val === undefined || isNaN(val)) return '';
+    // เพิ่ม maximumFractionDigits ให้รองรับทศนิยมลึกขึ้น (สูงสุด 4 ตำแหน่ง) สำหรับกรณีผลตอบแทน/เงินเฟ้อ
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(val);
   };
 
   const handleChange = (e) => {
     const raw = e.target.value.replace(/,/g, '');
+    // ตรวจสอบว่าเป็นตัวเลข (รวมทศนิยม) หรือไม่
     if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) {
-      onChange(raw === '' ? '' : parseFloat(raw));
+      // ส่งค่า raw กลับไปเป็น String แทน parseFloat เพื่อให้ผู้ใช้สามารถพิมพ์จุดทศนิยม (".") ได้โดยไม่ถูกตัดทิ้ง
+      onChange(raw); 
     }
   };
 
@@ -38,6 +40,22 @@ const NumberInput = ({ value, onChange, className, ...props }) => {
   );
 };
 
+// --- Helper Component: Quick Select Buttons ---
+const QuickSelect = ({ options, onSelect }) => (
+  <div className="flex flex-wrap gap-1.5 mt-2">
+    {options.map(val => (
+      <button
+        key={val}
+        type="button"
+        onClick={() => onSelect(val)}
+        className="text-[10px] px-2 py-1 bg-emerald-50 text-emerald-700 font-medium rounded border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition"
+      >
+        {val === 0 ? '0' : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(val)}
+      </button>
+    ))}
+  </div>
+);
+
 const RetirementPlanner = () => {
   // --- State for Inputs ---
   const [inputs, setInputs] = useState({
@@ -45,36 +63,36 @@ const RetirementPlanner = () => {
     retireAge: 60,
     lifeExpectancy: 85,
     expenseAmount: 20000,
-    expenseFrequency: 'monthly', // 'monthly' or 'yearly'
+    expenseFrequency: 'monthly',
     currentAssets: 500000,
     annualInvestAmount: 120000,
-    preRetireReturn: 6, // %
-    postRetireReturn: 4, // %
-    inflation: 3, // %
+    preRetireReturn: 6,
+    postRetireReturn: 4,
+    inflation: 3,
   });
 
   // --- Calculations ---
   const results = useMemo(() => {
-    const {
-      currentAge,
-      retireAge,
-      lifeExpectancy,
-      expenseAmount,
-      expenseFrequency,
-      currentAssets,
-      annualInvestAmount,
-      preRetireReturn,
-      postRetireReturn,
-      inflation,
-    } = inputs;
+    // 0. Parse safely to prevent NaN crashes
+    const currentAge = parseFloat(inputs.currentAge) || 0;
+    const retireAge = parseFloat(inputs.retireAge) || 0;
+    const lifeExpectancy = parseFloat(inputs.lifeExpectancy) || 0;
+    const expenseAmount = parseFloat(inputs.expenseAmount) || 0;
+    const currentAssets = parseFloat(inputs.currentAssets) || 0;
+    const annualInvestAmount = parseFloat(inputs.annualInvestAmount) || 0;
+    const preRetireReturn = parseFloat(inputs.preRetireReturn) || 0;
+    const postRetireReturn = parseFloat(inputs.postRetireReturn) || 0;
+    const inflation = parseFloat(inputs.inflation) || 0;
+    const expenseFrequency = inputs.expenseFrequency;
 
     // Basic Validations
-    if (currentAge >= retireAge || retireAge >= lifeExpectancy) {
+    if (currentAge >= retireAge || retireAge >= lifeExpectancy || currentAge <= 0) {
       return null;
     }
 
     const yearsToInvest = retireAge - currentAge;
-    const yearsInRetirement = lifeExpectancy - retireAge;
+    // +1 because loop is inclusive from retireAge to lifeExpectancy
+    const yearsInRetirement = lifeExpectancy - retireAge + 1; 
     
     // 1. Calculate Expenses at Retirement
     const annualExpenseCurrent = expenseFrequency === 'monthly' ? expenseAmount * 12 : expenseAmount;
@@ -86,6 +104,7 @@ const RetirementPlanner = () => {
     if (realReturnPost === 0) {
         requiredNestEgg = expenseAtRetirement * yearsInRetirement;
     } else {
+        // PV of Annuity Due
         requiredNestEgg = expenseAtRetirement * ((1 - Math.pow(1 + realReturnPost, -yearsInRetirement)) / realReturnPost) * (1 + realReturnPost);
     }
 
@@ -119,7 +138,7 @@ const RetirementPlanner = () => {
 
             const totalAssets = balancePrincipalExisting + balancePrincipalNew + balanceInterestExisting + balanceInterestNew;
             
-            // แก้ไขเงื่อนไข: ตรวจสอบว่าสินทรัพย์รวมน้อยกว่ายอดที่ต้องถอนในปีนั้นหรือไม่
+            // Check if money runs out
             if (totalAssets < withdrawAmount && isSufficient) {
                 isSufficient = false;
                 moneyRunOutAge = age;
@@ -191,78 +210,87 @@ const RetirementPlanner = () => {
             newSavings: Math.round(balancePrincipalNew),
             interestExisting: Math.round(balanceInterestExisting),
             interestNew: Math.round(balanceInterestNew),
-            interest: Math.round(balanceInterestExisting + balanceInterestNew), // สำหรับแสดงผลในกราฟแท่งรวม
+            interest: Math.round(balanceInterestExisting + balanceInterestNew), 
             
-            // ข้อมูลรายปีสำหรับ CSV
+            // CSV Details
             yearlyReturnOnExistingPrincipal: Math.round(yearlyReturnOnExistingPrincipal),
             yearlyReturnOnExistingInterest: Math.round(yearlyReturnOnExistingInterest),
             yearlyReturnNew: Math.round(yearlyReturnNew),
             yearlyInvest: Math.round(yearlyInvest),
             
             withdrawal: isRetired ? -Math.round(withdrawalDisplay) : 0,
-            marker: age === retireAge ? "🏖️" : (age === lifeExpectancy ? "🏁" : "")
+            marker: age === retireAge ? "🏖️" : (age === lifeExpectancy ? "🏁" : null) // Using null instead of "" for safety
         };
         chartData.push(displayData);
     }
 
-    // 4. Calculate Gap based on Projected Nest Egg from loop
+    // 4. Calculate Gap
     const r = preRetireReturn / 100;
     const gap = requiredNestEgg - projectedNestEgg;
 
     // 5. Suggestions
-    let suggestions = {};
-    if (gap > 0) {
-        // Option 1: Lump Sum
-        const additionalLumpSum = gap / Math.pow(1 + preRetireReturn / 100, yearsToInvest);
-        
-        // Option 2: Annual Savings (Investing starts Year 2, so n = yearsToInvest - 1)
-        let additionalAnnualSavings = 0;
-        let nInvestments = yearsToInvest - 1;
-        
-        if (nInvestments > 0) {
-            if (r === 0) {
-                additionalAnnualSavings = gap / nInvestments;
-            } else {
-                // FV of Annuity Due
-                let fvFactor = ((Math.pow(1 + r, nInvestments) - 1) / r) * (1 + r);
-                additionalAnnualSavings = gap / fvFactor;
-            }
-        } else {
-            additionalAnnualSavings = gap;
-        }
+    // Always initialize suggestions to prevent .toFixed crashes later!
+    let suggestions = {
+        addLumpSum: 0,
+        addAnnualSavings: 0,
+        maxMonthlyExpense: 0,
+        neededReturn: preRetireReturn
+    };
 
-        // Option 3: Reduce Expenses
-        let factor = 0;
-        if (realReturnPost === 0) {
-            factor = yearsInRetirement;
-        } else {
-            factor = ((1 - Math.pow(1 + realReturnPost, -yearsInRetirement)) / realReturnPost) * (1 + realReturnPost);
-        }
-        const maxAffordableExpenseAtRetirement = projectedNestEgg / factor;
-        const maxAffordableExpenseCurrent = maxAffordableExpenseAtRetirement / Math.pow(1 + inflation / 100, yearsToInvest);
-        const monthlyAffordable = maxAffordableExpenseCurrent / 12;
-
-        // Option 4: Required Return (Iterative)
-        let low = 0, high = 1.0; 
-        let neededReturn = preRetireReturn;
-        for(let i=0; i<50; i++) {
-            let mid = (low + high) / 2;
-            let testNestEgg = currentAssets * Math.pow(1 + mid, yearsToInvest);
+    if (gap > 0 || !isSufficient) {
+        // Only run complex reverse calculations if there is a gap mathematically
+        if (gap > 0) {
+            // Option 1: Lump Sum
+            const additionalLumpSum = gap / Math.pow(1 + preRetireReturn / 100, yearsToInvest);
+            
+            // Option 2: Annual Savings (Investing starts Year 2, so n = yearsToInvest - 1)
+            let additionalAnnualSavings = 0;
+            let nInvestments = yearsToInvest - 1;
+            
             if (nInvestments > 0) {
-                 if (mid === 0) testNestEgg += annualInvestAmount * nInvestments;
-                 else testNestEgg += annualInvestAmount * ((Math.pow(1 + mid, nInvestments) - 1) / mid) * (1 + mid);
+                if (r === 0) {
+                    additionalAnnualSavings = gap / nInvestments;
+                } else {
+                    let fvFactor = ((Math.pow(1 + r, nInvestments) - 1) / r) * (1 + r);
+                    additionalAnnualSavings = gap / fvFactor;
+                }
+            } else {
+                additionalAnnualSavings = gap;
             }
-            if (testNestEgg < requiredNestEgg) low = mid;
-            else high = mid;
-        }
-        neededReturn = (low + high) / 2 * 100;
 
-        suggestions = {
-            addLumpSum: additionalLumpSum,
-            addAnnualSavings: additionalAnnualSavings,
-            maxMonthlyExpense: monthlyAffordable,
-            neededReturn: neededReturn
-        };
+            // Option 3: Reduce Expenses
+            let factor = 0;
+            if (realReturnPost === 0) {
+                factor = yearsInRetirement;
+            } else {
+                factor = ((1 - Math.pow(1 + realReturnPost, -yearsInRetirement)) / realReturnPost) * (1 + realReturnPost);
+            }
+            const maxAffordableExpenseAtRetirement = projectedNestEgg / factor;
+            const maxAffordableExpenseCurrent = maxAffordableExpenseAtRetirement / Math.pow(1 + inflation / 100, yearsToInvest);
+            const monthlyAffordable = maxAffordableExpenseCurrent / 12;
+
+            // Option 4: Required Return (Iterative)
+            let low = 0, high = 1.0; 
+            let neededReturn = preRetireReturn;
+            for(let i=0; i<50; i++) {
+                let mid = (low + high) / 2;
+                let testNestEgg = currentAssets * Math.pow(1 + mid, yearsToInvest);
+                if (nInvestments > 0) {
+                     if (mid === 0) testNestEgg += annualInvestAmount * nInvestments;
+                     else testNestEgg += annualInvestAmount * ((Math.pow(1 + mid, nInvestments) - 1) / mid) * (1 + mid);
+                }
+                if (testNestEgg < requiredNestEgg) low = mid;
+                else high = mid;
+            }
+            neededReturn = (low + high) / 2 * 100;
+
+            suggestions = {
+                addLumpSum: additionalLumpSum,
+                addAnnualSavings: additionalAnnualSavings,
+                maxMonthlyExpense: monthlyAffordable,
+                neededReturn: neededReturn
+            };
+        }
     }
 
     return {
@@ -287,9 +315,8 @@ const RetirementPlanner = () => {
   const handleFrequencyChange = (newFreq) => {
     if (newFreq === inputs.expenseFrequency) return;
     
-    // Auto convert amount
     const multiplier = newFreq === 'yearly' ? 12 : 1/12;
-    const newAmount = Math.round(inputs.expenseAmount * multiplier);
+    const newAmount = Math.round(parseFloat(inputs.expenseAmount || 0) * multiplier);
 
     setInputs(prev => ({ 
         ...prev, 
@@ -302,29 +329,25 @@ const RetirementPlanner = () => {
   const handleExportCSV = () => {
     if (!results) return;
 
-    // 1. Prepare BOM for UTF-8 (Excel Thai support)
     const BOM = "\uFEFF";
     
-    // 2. Prepare Header Data (Inputs)
     let csvContent = BOM + "Parameter,Value\n";
-    csvContent += `Current Age,${inputs.currentAge}\n`;
-    csvContent += `Retirement Age,${inputs.retireAge}\n`;
-    csvContent += `Life Expectancy,${inputs.lifeExpectancy}\n`;
-    csvContent += `Expenses (${inputs.expenseFrequency}),${inputs.expenseAmount}\n`;
-    csvContent += `Current Assets,${inputs.currentAssets}\n`;
-    csvContent += `Annual Investment,${inputs.annualInvestAmount}\n`;
-    csvContent += `Pre-Retire Return %,${inputs.preRetireReturn}\n`;
-    csvContent += `Post-Retire Return %,${inputs.postRetireReturn}\n`;
-    csvContent += `Inflation %,${inputs.inflation}\n`;
-    csvContent += `\n`; // Spacer
+    csvContent += `Current Age,${inputs.currentAge || 0}\n`;
+    csvContent += `Retirement Age,${inputs.retireAge || 0}\n`;
+    csvContent += `Life Expectancy,${inputs.lifeExpectancy || 0}\n`;
+    csvContent += `Expenses (${inputs.expenseFrequency}),${inputs.expenseAmount || 0}\n`;
+    csvContent += `Current Assets,${inputs.currentAssets || 0}\n`;
+    csvContent += `Annual Investment,${inputs.annualInvestAmount || 0}\n`;
+    csvContent += `Pre-Retire Return %,${inputs.preRetireReturn || 0}\n`;
+    csvContent += `Post-Retire Return %,${inputs.postRetireReturn || 0}\n`;
+    csvContent += `Inflation %,${inputs.inflation || 0}\n`;
+    csvContent += `\n`; 
 
-    // 3. Prepare Table Data (Output)
     csvContent += "อายุ,ปีที่,เงินต้นที่ลงทุนก้อนแรก,ผลตอบแทนจากการลงทุนของเงินต้นแต่ละปี,ผลตอบแทนทบต้นจากกำไรสะสมแต่ละปี,เงินลงทุนเพิ่มแต่ละปี,ยอดสะสมของเงินลงทุนเพิ่ม,ผลตอบแทนจากเงินลงทุนเพิ่มแต่ละปี,เงินที่ถอนออกไปใช้แต่ละปี,ยอดสินทรัพย์สุทธิ\n";
     results.chartData.forEach(row => {
         csvContent += `${row.age},${row.yearIndex},${row.existingAssets},${row.yearlyReturnOnExistingPrincipal},${row.yearlyReturnOnExistingInterest},${row.yearlyInvest},${row.newSavings},${row.yearlyReturnNew},${Math.abs(row.withdrawal)},${row.total}\n`;
     });
 
-    // 4. Trigger Download
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -341,15 +364,16 @@ const RetirementPlanner = () => {
 
   // --- Formatters ---
   const formatMoney = (amount) => {
+    if (amount === undefined || amount === null || isNaN(amount)) return '฿0';
     return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(Math.abs(amount));
   };
   const formatNumber = (num) => {
-      return new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(num);
-  }
+    if (num === undefined || num === null || isNaN(num)) return '0';
+    return new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(num);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans print:bg-white">
-      {/* CSS for Print/PDF Export */}
       <style>{`
         @media print {
             @page { margin: 10mm; size: landscape; }
@@ -398,7 +422,6 @@ const RetirementPlanner = () => {
             </h2>
 
             <div className="space-y-5">
-              {/* Ages Section */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-1">
                   <label className="block text-xs font-medium text-gray-500 mb-1">อายุปัจจุบัน</label>
@@ -417,7 +440,6 @@ const RetirementPlanner = () => {
                 </div>
               </div>
 
-              {/* Expenses */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ค่าใช้จ่ายหลังเกษียณ (ณ ปัจจุบัน)</label>
                 <div className="flex gap-2 mb-2">
@@ -437,25 +459,35 @@ const RetirementPlanner = () => {
                     <NumberInput name="expenseAmount" value={inputs.expenseAmount} onChange={(val) => handleInputChange('expenseAmount', val)} 
                         className="w-full pl-8 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500" />
                 </div>
+                <QuickSelect 
+                    options={inputs.expenseFrequency === 'monthly' ? [20000, 30000, 50000] : [240000, 360000, 600000]} 
+                    onSelect={(val) => handleInputChange('expenseAmount', val)} 
+                />
               </div>
 
-              {/* Investments */}
               <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
                   <h3 className="text-sm font-semibold text-slate-700 mb-3 border-b pb-2">แผนการลงทุน</h3>
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-gray-500 mb-1">เงินต้นที่มีอยู่แล้ว (บาท)</label>
                     <NumberInput name="currentAssets" value={inputs.currentAssets} onChange={(val) => handleInputChange('currentAssets', val)} 
                         className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-gray-50" />
+                    <QuickSelect 
+                        options={[0, 500000, 1000000, 2000000, 3000000, 5000000]} 
+                        onSelect={(val) => handleInputChange('currentAssets', val)} 
+                    />
                   </div>
-                  <div>
+                  <div className="mt-4">
                     <label className="block text-xs font-medium text-emerald-700 mb-1">ลงทุนเพิ่มปีละ (บาท)</label>
                     <NumberInput name="annualInvestAmount" value={inputs.annualInvestAmount} onChange={(val) => handleInputChange('annualInvestAmount', val)} 
                         className="w-full p-2 border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-emerald-50 font-semibold text-emerald-900" />
-                    <p className="text-[10px] text-gray-400 mt-1 text-right">เฉลี่ยเดือนละ {formatNumber(inputs.annualInvestAmount/12)} บาท</p>
+                    <QuickSelect 
+                        options={[60000, 120000, 240000, 360000, 500000, 800000]} 
+                        onSelect={(val) => handleInputChange('annualInvestAmount', val)} 
+                    />
+                    <p className="text-[10px] text-gray-400 mt-2 text-right">เฉลี่ยเดือนละ {formatNumber((parseFloat(inputs.annualInvestAmount) || 0)/12)} บาท</p>
                   </div>
               </div>
 
-              {/* Returns & Inflation */}
               <div className="grid grid-cols-2 gap-4">
                  <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">ผลตอบแทนก่อนเกษียณ (%)</label>
@@ -479,27 +511,25 @@ const RetirementPlanner = () => {
           {/* Right Panel: Results & Chart */}
           <div className="w-full lg:w-2/3 p-6 md:p-8 bg-white h-auto lg:h-screen lg:overflow-y-auto print-full-width">
             
-            {/* Print Only Summary Header */}
             <div className="hidden print:block mb-6 p-4 border rounded-lg bg-gray-50">
                 <h2 className="text-lg font-bold mb-2">ข้อมูลสมมติฐาน:</h2>
                 <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>อายุ: {inputs.currentAge} - {inputs.retireAge} - {inputs.lifeExpectancy} ปี</div>
+                    <div>อายุ: {inputs.currentAge || 0} - {inputs.retireAge || 0} - {inputs.lifeExpectancy || 0} ปี</div>
                     <div>เงินต้น: {formatMoney(inputs.currentAssets)}</div>
                     <div>ลงทุนเพิ่ม: {formatMoney(inputs.annualInvestAmount)}/ปี</div>
                     <div>ค่าใช้จ่ายหลังเกษียณ: {formatMoney(inputs.expenseAmount)} ({inputs.expenseFrequency === 'monthly' ? 'ต่อเดือน' : 'ต่อปี'})</div>
-                    <div>ผลตอบแทน: {inputs.preRetireReturn}% / {inputs.postRetireReturn}%</div>
-                    <div>เงินเฟ้อ: {inputs.inflation}%</div>
+                    <div>ผลตอบแทน: {inputs.preRetireReturn || 0}% / {inputs.postRetireReturn || 0}%</div>
+                    <div>เงินเฟ้อ: {inputs.inflation || 0}%</div>
                 </div>
             </div>
 
             {!results ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400">
                     <AlertCircle className="w-12 h-12 mb-2" />
-                    <p>กรุณาตรวจสอบอายุที่กรอก (อายุเกษียณต้องมากกว่าอายุปัจจุบัน)</p>
+                    <p>กรุณาตรวจสอบอายุที่กรอก (อายุเกษียณต้องมากกว่าอายุปัจจุบันและมากกว่า 0)</p>
                 </div>
             ) : (
                 <>
-                {/* Status Banner */}
                 <div className={`rounded-2xl p-6 text-white shadow-lg mb-8 print-break-inside ${results.isSufficient ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-500 to-red-600'}`}>
                      <div className="flex items-start justify-between">
                         <div>
@@ -511,8 +541,8 @@ const RetirementPlanner = () => {
                             </div>
                             <p className="opacity-90">
                                 {results.isSufficient 
-                                    ? `คุณจะมีเงินเหลือประมาณ ${formatMoney(results.chartData[results.chartData.length-1].total)} ณ อายุ ${inputs.lifeExpectancy} ปี` 
-                                    : `เงินของคุณจะหมดลงเมื่ออายุประมาณ ${results.moneyRunOutAge} ปี (ขาดทุนทรัพย์รวมประมาณ ${formatMoney(results.gap)} ณ วันเกษียณ)`}
+                                    ? `คุณจะมีเงินเหลือประมาณ ${formatMoney(results.chartData[results.chartData.length-1]?.total || 0)} ณ อายุ ${inputs.lifeExpectancy || 0} ปี` 
+                                    : `เงินของคุณจะหมดลงเมื่ออายุประมาณ ${results.moneyRunOutAge || '-'} ปี (ขาดทุนทรัพย์รวมประมาณ ${formatMoney(results.gap)} ณ วันเกษียณ)`}
                             </p>
                         </div>
                         <div className="text-right hidden md:block">
@@ -523,7 +553,6 @@ const RetirementPlanner = () => {
                      </div>
                 </div>
 
-                {/* Suggestions Section (Show only if Not Sufficient) */}
                 {!results.isSufficient && (
                     <div className="mb-8 print-break-inside">
                         <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -531,60 +560,54 @@ const RetirementPlanner = () => {
                             คำแนะนำ: เลือกปรับแผนได้ 4 ทางเลือก
                         </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Option 1 */}
                             <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl print:border-gray-300">
                                 <div className="text-sm text-gray-500 mb-1">1. เพิ่มเงินลงทุนก้อนแรก</div>
                                 <div className="flex items-end gap-2">
-                                    <span className="text-2xl font-bold text-blue-700">{formatMoney(results.suggestions.addLumpSum)}</span>
+                                    <span className="text-2xl font-bold text-blue-700">{formatMoney(results.suggestions?.addLumpSum || 0)}</span>
                                     <span className="text-xs text-blue-600 mb-1.5">(เพิ่มทันที)</span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-2">จากเดิม {formatNumber(inputs.currentAssets)} เป็น {formatNumber(inputs.currentAssets + results.suggestions.addLumpSum)}</p>
+                                <p className="text-xs text-gray-500 mt-2">จากเดิม {formatNumber(inputs.currentAssets)} เป็น {formatNumber((parseFloat(inputs.currentAssets) || 0) + (results.suggestions?.addLumpSum || 0))}</p>
                             </div>
 
-                            {/* Option 2 */}
                             <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl print:border-gray-300">
                                 <div className="text-sm text-gray-500 mb-1">2. ลงทุนเพิ่มในแต่ละปี</div>
                                 <div className="flex items-end gap-2">
-                                    <span className="text-2xl font-bold text-emerald-700">{formatMoney(inputs.annualInvestAmount + results.suggestions.addAnnualSavings)}</span>
+                                    <span className="text-2xl font-bold text-emerald-700">{formatMoney((parseFloat(inputs.annualInvestAmount) || 0) + (results.suggestions?.addAnnualSavings || 0))}</span>
                                     <span className="text-xs text-emerald-600 mb-1.5">/ ปี</span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-2">เพิ่มขึ้นปีละ {formatMoney(results.suggestions.addAnnualSavings)}</p>
+                                <p className="text-xs text-gray-500 mt-2">เพิ่มขึ้นปีละ {formatMoney(results.suggestions?.addAnnualSavings || 0)}</p>
                             </div>
 
-                            {/* Option 3 */}
                             <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl print:border-gray-300">
                                 <div className="text-sm text-gray-500 mb-1">3. ลดค่าใช้จ่ายหลังเกษียณ</div>
                                 <div className="flex items-end gap-2">
-                                    <span className="text-2xl font-bold text-amber-700">{formatMoney(results.suggestions.maxMonthlyExpense)}</span>
+                                    <span className="text-2xl font-bold text-amber-700">{formatMoney(results.suggestions?.maxMonthlyExpense || 0)}</span>
                                     <span className="text-xs text-amber-600 mb-1.5">/ เดือน</span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-2">ลดลงจาก {formatMoney(inputs.expenseFrequency === 'monthly' ? inputs.expenseAmount : inputs.expenseAmount/12)}</p>
+                                <p className="text-xs text-gray-500 mt-2">ลดลงจาก {formatMoney(inputs.expenseFrequency === 'monthly' ? inputs.expenseAmount : (parseFloat(inputs.expenseAmount) || 0)/12)}</p>
                             </div>
 
-                             {/* Option 4 */}
                              <div className="bg-purple-50 border border-purple-100 p-4 rounded-xl print:border-gray-300">
                                 <div className="text-sm text-gray-500 mb-1">4. เพิ่มผลตอบแทนก่อนเกษียณ</div>
                                 <div className="flex items-end gap-2">
-                                    <span className="text-2xl font-bold text-purple-700">{results.suggestions.neededReturn.toFixed(2)}%</span>
+                                    <span className="text-2xl font-bold text-purple-700">{(results.suggestions?.neededReturn || parseFloat(inputs.preRetireReturn) || 0).toFixed(2)}%</span>
                                     <span className="text-xs text-purple-600 mb-1.5">/ ปี</span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-2">เพิ่มขึ้นจากเดิม {inputs.preRetireReturn}%</p>
+                                <p className="text-xs text-gray-500 mt-2">เพิ่มขึ้นจากเดิม {parseFloat(inputs.preRetireReturn) || 0}%</p>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* Chart Section */}
                 <div className="print-break-inside">
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <TrendingUp className="w-5 h-5 text-emerald-600" />
                         เส้นทางความมั่งคั่ง (Wealth Path)
                     </h3>
                     <div className="h-[400px] w-full border border-gray-100 rounded-2xl p-4 bg-white relative print:h-[500px] print:border-0">
-                        {/* Emoticon Legend */}
                         <div className="absolute top-4 right-4 flex gap-3 text-xs bg-white/80 p-2 rounded-lg border">
-                            <span>🏖️ วันเกษียณ ({inputs.retireAge} ปี)</span>
-                            <span>🏁 สิ้นอายุขัย ({inputs.lifeExpectancy} ปี)</span>
+                            <span>🏖️ วันเกษียณ ({inputs.retireAge || 0} ปี)</span>
+                            <span>🏁 สิ้นอายุขัย ({inputs.lifeExpectancy || 0} ปี)</span>
                         </div>
 
                         <ResponsiveContainer width="100%" height="100%">
@@ -602,11 +625,11 @@ const RetirementPlanner = () => {
                                     label={{ value: 'อายุ (ปี)', position: 'insideBottom', offset: -10 }} 
                                 />
                                 <YAxis 
-                                    tickFormatter={(value) => `${(value / 1000000).toFixed(1)}M`}
+                                    tickFormatter={(value) => `${((parseFloat(value) || 0) / 1000000).toFixed(1)}M`}
                                     tick={{fontSize: 12}}
                                 />
                                 <Tooltip 
-                                    formatter={(value, name, props) => {
+                                    formatter={(value, name) => {
                                         if (name === 'total') return [formatMoney(value), 'สินทรัพย์รวมสุทธิ'];
                                         return [formatMoney(value), name];
                                     }}
